@@ -1,3 +1,4 @@
 /target
 seed.txt
 Cargo.lock
+.env

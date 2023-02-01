@@ -7,7 +7,6 @@ use bip32::{Mnemonic, XPrv};
 use rand_core::OsRng;
 
 use crate::account::{Account, CoinType};
-use crate::btc::xpub_to_btc_address;
 
 mod account;
 mod btc;
@@ -55,6 +54,7 @@ fn get_seed(password: &str) -> anyhow::Result<Seed> {
 }
 
 fn main() -> anyhow::Result<()> {
+    dotenvy::dotenv().ok();
     let seed = get_seed("password")?;
 
     let root_xprv = create_xpriv(&seed)?;
