@@ -3,7 +3,10 @@ use bip32::{
     ExtendedPrivateKey, ExtendedPublicKey, Seed, XPrv,
 };
 
-use crate::btc::{calculate_utxo, xpub_to_btc_address};
+use crate::btc::{
+    calculate_utxo, create_raw_transaction, gen_script_sig, sign_raw_transaction,
+    xpub_to_btc_address,
+};
 use anyhow::Result;
 
 #[derive(Debug, Clone, Copy)]
@@ -40,11 +43,29 @@ impl Account {
         })
     }
 
-    pub fn sign_transaction(&self, transaction_hex: &str) -> String {
-        let signature: Signature = self.xpriv.private_key().sign(transaction_hex.as_bytes());
-        let hex_tx_sig = hex::encode(signature.to_der());
-        let hex_xpub = hex::encode(self.xpub.public_key().to_bytes());
-        format!("{hex_tx_sig} {hex_xpub}")
+    pub fn sign_transaction(
+        &self,
+        tx_hash: &str,
+        prev_tx_id: &str,
+        from_address: &str,
+        to_address: &str,
+        amount: u64,
+    ) -> Result<String> {
+        let signed_tx_hash = sign_raw_transaction(self.xpriv.private_key(), tx_hash.into())?;
+        let script_sign = gen_script_sig(
+            &signed_tx_hash,
+            &hex::encode(self.xpub.public_key().to_bytes()),
+        );
+
+        let signed_tx = create_raw_transaction(
+            prev_tx_id,
+            from_address,
+            to_address,
+            amount,
+            Some(&script_sign),
+        )?;
+
+        Ok(signed_tx)
     }
 
     fn make_path(coin_type: &CoinType, i: u32) -> String {

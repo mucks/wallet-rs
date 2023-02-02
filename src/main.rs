@@ -4,9 +4,11 @@ use std::path::Path;
 use bip32::secp256k1::ecdsa::SigningKey;
 use bip32::{ExtendedPrivateKey, Seed};
 use bip32::{Mnemonic, XPrv};
+use btc::create_raw_transaction;
 use rand_core::OsRng;
 
 use crate::account::{Account, CoinType};
+use crate::btc::send_transaction;
 
 mod account;
 mod btc;
@@ -79,18 +81,34 @@ async fn main() -> anyhow::Result<()> {
         );
     }
 
-    let tx = btc::create_transaction(
-        &btc_testnet_account.get_address()?,
-        &btc_testnet_account_2.get_address()?,
-        0.0001,
-    )
-    .await?;
+    let prev_tx_id = "671c26cf0d7bf8d056d783e5bb4f785eb28adbe12de112c1b9d9a0af118cf2a7";
+    let from_address = "mmsKA9wjZjxh6bdemdzQLzsWjAiEt8aes7";
+    let to_address = "mrv6BbWSeETPyQV7DwkSobKqZCsL1aJdnx";
+    let amount = 20_000;
+
+    let tx = create_raw_transaction(prev_tx_id, from_address, to_address, amount, None)?;
 
     println!("Transaction: {tx}");
 
-    let signed_tx = btc_testnet_account.sign_transaction(&tx);
+    let signed_tx =
+        btc_testnet_account.sign_transaction(&tx, prev_tx_id, from_address, to_address, amount)?;
 
     println!("Signed Transaction: {signed_tx}");
+
+    send_transaction(&signed_tx).await?;
+
+    // let tx = btc::create_transaction(
+    //     &btc_testnet_account.get_address()?,
+    //     &btc_testnet_account_2.get_address()?,
+    //     0.0001,
+    // )
+    // .await?;
+
+    // println!("Transaction: {tx}");
+
+    // let signed_tx = btc_testnet_account.sign_transaction(&tx);
+
+    // println!("Signed Transaction: {signed_tx}");
 
     Ok(())
 }
