@@ -62,7 +62,11 @@ async fn main() -> anyhow::Result<()> {
     let btc_testnet_account = Account::new(&seed, 0, CoinType::BitcoinTestnet)?;
     let btc_testnet_account_2 = Account::new(&seed, 1, CoinType::BitcoinTestnet)?;
 
-    let accounts = vec![btc_account, btc_testnet_account, btc_testnet_account_2];
+    let accounts = vec![
+        btc_account.clone(),
+        btc_testnet_account.clone(),
+        btc_testnet_account_2.clone(),
+    ];
 
     for account in accounts {
         let address = account.get_address()?;
@@ -75,20 +79,18 @@ async fn main() -> anyhow::Result<()> {
         );
     }
 
+    let tx = btc::create_transaction(
+        &btc_testnet_account.get_address()?,
+        &btc_testnet_account_2.get_address()?,
+        0.0001,
+    )
+    .await?;
+
+    println!("Transaction: {tx}");
+
+    let signed_tx = btc_testnet_account.sign_transaction(&tx);
+
+    println!("Signed Transaction: {signed_tx}");
+
     Ok(())
-
-    // // Get the ECDSA/secp256k1 signing and verification keys for the xprv and xpub
-    // let signing_key = btc_xprv.private_key();
-    // let verification_key = btc_xpub.public_key();
-
-    // // Sign and verify an example message using the derived keys.
-    // use bip32::secp256k1::ecdsa::{
-    //     signature::{Signer, Verifier},
-    //     Signature,
-    // };
-
-    // let example_msg = b"Hello, world!";
-    // let signature: Signature = signing_key.sign(example_msg);
-    // assert!(verification_key.verify(example_msg, &signature).is_ok());
-    // Ok(())
 }

@@ -1,12 +1,12 @@
 use bip32::{
-    secp256k1::ecdsa::{SigningKey, VerifyingKey},
+    secp256k1::ecdsa::{signature::Signer, Signature, SigningKey, VerifyingKey},
     ExtendedPrivateKey, ExtendedPublicKey, Seed, XPrv,
 };
 
 use crate::btc::{calculate_utxo, xpub_to_btc_address};
 use anyhow::Result;
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub enum CoinType {
     Bitcoin = 0,
     BitcoinTestnet = 1,
@@ -14,6 +14,7 @@ pub enum CoinType {
     Litecoin = 2,
 }
 
+#[derive(Clone)]
 pub struct Account {
     path: String,
     pub coin_type: CoinType,
@@ -37,6 +38,13 @@ impl Account {
             xpriv: child_xprv,
             xpub: child_xpub,
         })
+    }
+
+    pub fn sign_transaction(&self, transaction_hex: &str) -> String {
+        let signature: Signature = self.xpriv.private_key().sign(transaction_hex.as_bytes());
+        let hex_tx_sig = hex::encode(signature.to_der());
+        let hex_xpub = hex::encode(self.xpub.public_key().to_bytes());
+        format!("{hex_tx_sig} {hex_xpub}")
     }
 
     fn make_path(coin_type: &CoinType, i: u32) -> String {
