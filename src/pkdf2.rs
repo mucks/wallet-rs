@@ -15,7 +15,7 @@ fn make_key(password: &[u8]) -> LessSafeKey {
         PBKDF2_HMAC_SHA256,
         NonZeroU32::new(100).unwrap(),
         salt,
-        &password[..],
+        password,
         &mut key,
     );
 

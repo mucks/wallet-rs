@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use ripemd::Digest;
 use ripemd::Ripemd160;
 use serde::de::DeserializeOwned;
@@ -6,7 +6,14 @@ use serde::Deserialize;
 use serde::Serialize;
 use sha2::Sha256;
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone)]
+pub struct Block {
+    pub hash: String,
+    pub height: u64,
+    pub tx: Vec<String>,
+}
+
+#[derive(Deserialize, Clone)]
 pub struct Transaction {
     pub txid: String,
     pub version: u32,
@@ -15,14 +22,14 @@ pub struct Transaction {
     pub vout: Vec<VOut>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone)]
 pub struct VIn {
     pub coinbase: String,
     pub txinwitness: Vec<String>,
     pub sequence: u32,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone)]
 pub struct VOut {
     pub value: f64,
     pub n: u32,
@@ -30,7 +37,7 @@ pub struct VOut {
     pub script_pub_key: ScriptPubKey,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone)]
 pub struct ScriptPubKey {
     pub asm: String,
     pub hex: String,
@@ -59,9 +66,8 @@ impl JsonRpcBody {
 }
 use std::env::var;
 
-async fn btc_json_rpc<S, T>(body: &S) -> Result<T>
+async fn btc_json_rpc<T>(body: &Vec<JsonRpcBody>) -> Result<Vec<T>>
 where
-    S: Serialize,
     T: DeserializeOwned,
 {
     let client = reqwest::Client::new();
@@ -76,48 +82,94 @@ where
         .json(body)
         .send()
         .await?
-        .json::<serde_json::Value>()
+        .json::<Vec<serde_json::Value>>()
         .await?;
 
-    Ok(serde_json::from_value(json["result"].clone())?)
+    let results = json
+        .into_iter()
+        .filter_map(|j| serde_json::from_value(j["result"].clone()).ok())
+        .collect();
+
+    Ok(results)
 }
 
 async fn get_block_count() -> Result<u64> {
-    let body = JsonRpcBody::new("getblockcount", vec![]);
-    let count: u64 = btc_json_rpc(&body).await?;
-    Ok(count)
+    let body = vec![JsonRpcBody::new("getblockcount", vec![])];
+    let count: Vec<u64> = btc_json_rpc(&body).await?;
+    Ok(count[0])
+}
+
+async fn get_block_hashes(block_heights: Vec<u64>) -> Result<Vec<String>> {
+    let body: Vec<JsonRpcBody> = block_heights
+        .into_iter()
+        .map(|block_height| JsonRpcBody::new("getblockhash", vec![block_height.into()]))
+        .collect();
+
+    let hashes: Vec<String> = btc_json_rpc(&body).await?;
+    Ok(hashes)
 }
 
 async fn get_block_hash(block_height: u64) -> Result<String> {
-    let body = JsonRpcBody::new("getblockhash", vec![block_height.into()]);
-    let hash: String = btc_json_rpc(&body).await?;
-    Ok(hash)
-}
-
-#[derive(Deserialize)]
-pub struct Block {
-    pub hash: String,
-    pub height: u64,
-    pub tx: Vec<String>,
+    Ok(get_block_hashes(vec![block_height])
+        .await?
+        .get(0)
+        .ok_or_else(|| anyhow!("no block_hash found for block_height {}", block_height))?
+        .clone())
 }
 
 async fn get_block(block_hash: &str) -> Result<Block> {
-    let body = JsonRpcBody::new("getblock", vec![block_hash.into()]);
-    let block: Block = btc_json_rpc(&body).await?;
+    Ok(get_blocks(vec![block_hash.to_string()])
+        .await?
+        .get(0)
+        .ok_or_else(|| anyhow!("no block found for {}", block_hash))?
+        .clone())
+}
 
-    Ok(block)
+async fn get_blocks(block_hashes: Vec<String>) -> Result<Vec<Block>> {
+    let body: Vec<JsonRpcBody> = block_hashes
+        .into_iter()
+        .map(|block_hash| JsonRpcBody::new("getblock", vec![block_hash.into()]))
+        .collect();
+    let blocks: Vec<Block> = btc_json_rpc(&body).await?;
+    Ok(blocks)
 }
 
 async fn get_transaction(txid: &str) -> Result<Transaction> {
-    let body = JsonRpcBody::new("getrawtransaction", vec![txid.into(), true.into()]);
-    let tx: Transaction = btc_json_rpc(&body).await?;
-    Ok(tx)
+    Ok(get_transactions(vec![txid.to_string()])
+        .await?
+        .get(0)
+        .ok_or_else(|| anyhow!("no transaction found for {}", txid))?
+        .clone())
 }
 
-fn calculate_utxo(address: &str) -> u32 {
-    let mut utxo = 0;
+async fn get_transactions(txids: Vec<String>) -> Result<Vec<Transaction>> {
+    let body: Vec<JsonRpcBody> = txids
+        .into_iter()
+        .map(|txid| JsonRpcBody::new("getrawtransaction", vec![txid.into(), true.into()]))
+        .collect();
 
-    0
+    let txs: Vec<Transaction> = btc_json_rpc(&body).await?;
+    Ok(txs)
+}
+
+pub async fn calculate_utxo(address: &str) -> Result<f64> {
+    let mut utxo = 0.;
+
+    let block_count = get_block_count().await?;
+    let block_hashes = get_block_hashes((0..block_count).collect()).await?;
+    let blocks = get_blocks(block_hashes).await?;
+    let txids: Vec<String> = blocks.into_iter().flat_map(|block| block.tx).collect();
+    let txs = get_transactions(txids).await?;
+
+    for tx in txs {
+        for vout in tx.vout {
+            if vout.script_pub_key.address == Some(address.to_string()) {
+                utxo += vout.value;
+            }
+        }
+    }
+
+    Ok(utxo)
 }
 
 fn sha256(input: &[u8]) -> Vec<u8> {
@@ -162,6 +214,11 @@ pub fn xpub_to_btc_address(public_key: &[u8], testnet: bool) -> String {
 
 #[cfg(test)]
 mod tests {
+    use crate::{
+        account::{Account, CoinType},
+        get_seed,
+    };
+
     use super::*;
 
     #[tokio::test]
@@ -176,6 +233,13 @@ mod tests {
     async fn test_get_block_hash() -> anyhow::Result<()> {
         dotenvy::dotenv().ok();
         let hash = get_block_hash(1).await?;
+        assert!(!hash.is_empty());
+        Ok(())
+    }
+    #[tokio::test]
+    async fn test_get_block_hashes() -> anyhow::Result<()> {
+        dotenvy::dotenv().ok();
+        let hash = get_block_hashes((1..10).collect()).await?;
         assert!(!hash.is_empty());
         Ok(())
     }
@@ -197,6 +261,17 @@ mod tests {
         let block = get_block(&hash).await?;
         let tx = get_transaction(&block.tx[0]).await?;
         assert_eq!(tx.txid, block.tx[0]);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_calculate_utxo() -> anyhow::Result<()> {
+        dotenvy::dotenv().ok();
+        let seed = get_seed("password")?;
+        let btc_testnet = Account::new(&seed, CoinType::BitcoinTestnet)?;
+        let address = btc_testnet.get_address()?;
+        let utxo = calculate_utxo(&address).await?;
+        assert!(utxo > 0.);
         Ok(())
     }
 }

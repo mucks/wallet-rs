@@ -1,6 +1,10 @@
-use bip32::{Seed, XPrv};
+use bip32::{
+    secp256k1::ecdsa::{SigningKey, VerifyingKey},
+    ExtendedPrivateKey, ExtendedPublicKey, Seed, XPrv,
+};
 
-use crate::btc::xpub_to_btc_address;
+use crate::btc::{calculate_utxo, xpub_to_btc_address};
+use anyhow::Result;
 
 #[derive(Debug)]
 pub enum CoinType {
@@ -13,33 +17,53 @@ pub enum CoinType {
 pub struct Account {
     path: String,
     pub coin_type: CoinType,
+    pub index: u32,
+    xpriv: ExtendedPrivateKey<SigningKey>,
+    xpub: ExtendedPublicKey<VerifyingKey>,
 }
 
 impl Account {
-    pub fn new(coin_type: CoinType) -> Self {
-        Self {
-            path: Self::make_path(&coin_type),
-            coin_type,
-        }
-    }
+    pub fn new(seed: &Seed, index: u32, coin_type: CoinType) -> Result<Self> {
+        let path = Self::make_path(&coin_type, index);
 
-    fn make_path(coin_type: &CoinType) -> String {
-        match coin_type {
-            CoinType::Bitcoin => "m/44'/0'/0'/0/0".to_string(),
-            CoinType::BitcoinTestnet => "m/44'/1'/0'/0/0".to_string(),
-            CoinType::Ethereum => "m/44'/60'/0'/0/0".to_string(),
-            CoinType::Litecoin => "m/44'/2'/0'/0/0".to_string(),
-        }
-    }
-
-    pub fn get_address(&self, seed: &Seed) -> anyhow::Result<String> {
-        let child_path = self.path.parse()?;
+        let child_path = path.parse()?;
         let child_xprv = XPrv::derive_from_path(seed, &child_path)?;
         let child_xpub = child_xprv.public_key();
 
+        Ok(Self {
+            index,
+            path,
+            coin_type,
+            xpriv: child_xprv,
+            xpub: child_xpub,
+        })
+    }
+
+    fn make_path(coin_type: &CoinType, i: u32) -> String {
+        match coin_type {
+            CoinType::Bitcoin => format!("m/44'/0'/{i}'/0/0"),
+            CoinType::BitcoinTestnet => format!("m/44'/1'/{i}'/0/0"),
+            CoinType::Ethereum => format!("m/44'/60'/{i}'/0/0"),
+            CoinType::Litecoin => format!("m/44'/2'/{i}'/0/0"),
+        }
+    }
+
+    pub async fn get_balance(&self) -> Result<f64> {
         match self.coin_type {
-            CoinType::Bitcoin => Ok(xpub_to_btc_address(&child_xpub.to_bytes(), false)),
-            CoinType::BitcoinTestnet => Ok(xpub_to_btc_address(&child_xpub.to_bytes(), true)),
+            CoinType::Bitcoin => Ok(0.0),
+            CoinType::BitcoinTestnet => calculate_utxo(&self.get_address()?).await ,
+            _ => {
+                todo!()
+            }
+            // CoinType::Ethereum => Ok(xpub_to_eth_address(&child_xpub.to_bytes())),
+            // CoinType::Litecoin => Ok(xpub_to_btc_address(&child_xpub.to_bytes())),
+        }
+    }
+
+    pub fn get_address(&self) -> Result<String> {
+        match self.coin_type {
+            CoinType::Bitcoin => Ok(xpub_to_btc_address(&self.xpub.to_bytes(), false)),
+            CoinType::BitcoinTestnet => Ok(xpub_to_btc_address(&self.xpub.to_bytes(), true)),
             _ => {
                 todo!()
             }

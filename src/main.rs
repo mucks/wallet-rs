@@ -53,19 +53,26 @@ fn get_seed(password: &str) -> anyhow::Result<Seed> {
     }
 }
 
-fn main() -> anyhow::Result<()> {
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
     dotenvy::dotenv().ok();
     let seed = get_seed("password")?;
 
-    let root_xprv = create_xpriv(&seed)?;
+    let btc_account = Account::new(&seed, 0, CoinType::Bitcoin)?;
+    let btc_testnet_account = Account::new(&seed, 0, CoinType::BitcoinTestnet)?;
+    let btc_testnet_account_2 = Account::new(&seed, 1, CoinType::BitcoinTestnet)?;
 
-    let btc_account = Account::new(CoinType::Bitcoin);
-    let btc_testnet_account = Account::new(CoinType::BitcoinTestnet);
-    let accounts = vec![btc_account, btc_testnet_account];
+    let accounts = vec![btc_account, btc_testnet_account, btc_testnet_account_2];
 
     for account in accounts {
-        let address = account.get_address(&seed)?;
-        println!("{:?}: {}", account.coin_type, address);
+        let address = account.get_address()?;
+        println!(
+            "{:?} | Account: {} | Address: {} | Balance: {}",
+            account.coin_type,
+            account.index,
+            address,
+            account.get_balance().await?
+        );
     }
 
     Ok(())
